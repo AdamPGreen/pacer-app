@@ -12,7 +12,9 @@ const LoginPage: React.FC = () => {
   const { error, clearError } = useSpotify();
 
   useEffect(() => {
+    console.log('LoginPage useEffect triggered. Session:', session);
     if (session) {
+      console.log('Session found in LoginPage, navigating to /');
       navigate('/', { replace: true }); // Redirect if session exists
     }
   }, [session, navigate]);
