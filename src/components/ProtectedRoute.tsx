@@ -1,10 +1,9 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useSession } from '@supabase/auth-helpers-react';
+import { useSessionContext } from '@supabase/auth-helpers-react';
 
 const ProtectedRoute: React.FC = () => {
-  const session = useSession();
-  const isLoading = session === undefined; // useSession is undefined initially
+  const { session, isLoading } = useSessionContext();
 
   console.log('ProtectedRoute render. isLoading:', isLoading, 'Session:', session);
 
