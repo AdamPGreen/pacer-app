@@ -36,16 +36,16 @@ serve(async (req: Request) => {
   console.log(`spotify-search function invoked (method: ${req.method})`);
 
   try {
-    // 1. Extract Spotify token directly from Authorization header
-    const authHeader = req.headers.get('Authorization');
-    console.log(`Authorization header received: ${authHeader ? 'Bearer ...' : 'null'}`); // Log presence, not value
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('Missing or invalid Authorization header');
-      return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-    const accessToken = authHeader.substring(7); // Remove 'Bearer '
+    // 1. Extract Spotify token directly from Authorization header (REMOVED)
+    // const authHeader = req.headers.get('Authorization');
+    // console.log(`Authorization header received: ${authHeader ? 'Bearer ...' : 'null'}`); // Log presence, not value
+    // if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    //   console.error('Missing or invalid Authorization header');
+    //   return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
+    //     status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    //   });
+    // }
+    // const accessToken = authHeader.substring(7); // Remove 'Bearer '
 
     // 2. Get request body parameters (renumbered)
     if (req.method !== 'POST') {
@@ -59,14 +59,19 @@ serve(async (req: Request) => {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
     }
-    const { genre, targetTempo, limit = 20 } = await req.json();
-    console.log(`Search parameters: genre=${genre}, targetTempo=${targetTempo}, limit=${limit}`);
-    if (!genre || typeof targetTempo !== 'number' || typeof limit !== 'number') {
-      console.error('Invalid parameters received');
-      return new Response(JSON.stringify({ error: 'Missing or invalid parameters: genre (string), targetTempo (number), limit (number)' }), {
+    const { genre, targetTempo, limit = 20, spotifyToken } = await req.json(); // Extract spotifyToken
+    console.log(`Search parameters: genre=${genre}, targetTempo=${targetTempo}, limit=${limit}, spotifyToken received: ${!!spotifyToken}`); // Log token presence
+
+    // Validate required parameters including spotifyToken
+    if (!genre || typeof targetTempo !== 'number' || typeof limit !== 'number' || !spotifyToken) {
+      console.error('Invalid parameters received (genre, targetTempo, limit, spotifyToken)');
+      return new Response(JSON.stringify({ error: 'Missing or invalid parameters: genre (string), targetTempo (number), limit (number), spotifyToken (string)' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
+
+    // Assign spotifyToken to accessToken for clarity in subsequent code
+    const accessToken = spotifyToken;
 
     // 3. Spotify Search Logic (Using Recommendations Endpoint - Simpler for Tempo) (renumbered)
     // Construct recommendation query params
@@ -80,7 +85,7 @@ serve(async (req: Request) => {
     });
 
     console.log(`Calling Spotify API: /recommendations?${queryParams.toString()}`);
-    const recommendations = await fetchSpotifyApi(`/recommendations?${queryParams.toString()}`, accessToken);
+    const recommendations = await fetchSpotifyApi(`/recommendations?${queryParams.toString()}`, accessToken); // Use the token from body
     const tracks = recommendations.tracks; // Array of Track Objects
     console.log(`Spotify API returned ${tracks?.length ?? 0} tracks.`);
 
@@ -96,7 +101,8 @@ serve(async (req: Request) => {
     console.error('Function Error Caught:', error);
     // Distinguish Spotify API errors from other errors
     const isSpotifyAuthError = error.message.includes('Spotify API Error (401)') || error.message.includes('invalid access token');
-    const isInternalAuthError = error.message.includes('Authorization header');
+    // Update internal auth error check to reflect missing token in body
+    const isInternalAuthError = error.message.includes('Missing or invalid parameters'); // Simpler check now
     const statusCode = isSpotifyAuthError || isInternalAuthError ? 401 : 500;
 
     return new Response(JSON.stringify({ error: error.message }), {

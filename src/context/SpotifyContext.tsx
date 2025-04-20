@@ -94,10 +94,12 @@ export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     try {
       const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-search', {
-        headers: {
-          'Authorization': `Bearer ${session.provider_token}` // Pass Spotify token
+        body: {
+          genre,
+          targetTempo,
+          limit,
+          spotifyToken: session.provider_token
         },
-        body: { genre, targetTempo, limit },
       });
       if (functionError) {
         console.error('Error searching tracks:', functionError);
