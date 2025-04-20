@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Remove Supabase client import if no longer needed for other purposes
+// import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 
 // Basic Spotify API client using fetch
@@ -32,34 +33,43 @@ serve(async (req: Request) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  console.log(`spotify-search function invoked (method: ${req.method})`);
+
   try {
-    // 1. Create Supabase client with user's auth context
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      // Crucially, pass the Authorization header from the incoming request
-      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
-    );
+    // 1. Extract Spotify token directly from Authorization header
+    const authHeader = req.headers.get('Authorization');
+    console.log(`Authorization header received: ${authHeader ? 'Bearer ...' : 'null'}`); // Log presence, not value
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid Authorization header');
+      return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    const accessToken = authHeader.substring(7); // Remove 'Bearer '
 
-    // 2. Get user session and verify Spotify provider token
-    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-    if (sessionError) throw new Error(`Supabase Auth Error: ${sessionError.message}`);
-    if (!session) throw new Error("User not authenticated.");
-    if (!session.provider_token) throw new Error("Spotify provider token not found in session.");
-
-    const accessToken = session.provider_token;
-
-    // 3. Get request body parameters
+    // 2. Get request body parameters (renumbered)
+    if (req.method !== 'POST') {
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+          status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+    }
+    // Ensure body exists before parsing
+    if (!req.body) {
+         return new Response(JSON.stringify({ error: 'Request body required' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+    }
     const { genre, targetTempo, limit = 20 } = await req.json();
+    console.log(`Search parameters: genre=${genre}, targetTempo=${targetTempo}, limit=${limit}`);
     if (!genre || typeof targetTempo !== 'number' || typeof limit !== 'number') {
+      console.error('Invalid parameters received');
       return new Response(JSON.stringify({ error: 'Missing or invalid parameters: genre (string), targetTempo (number), limit (number)' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // 4. Spotify Search Logic (Using Recommendations Endpoint - Simpler for Tempo)
+    // 3. Spotify Search Logic (Using Recommendations Endpoint - Simpler for Tempo) (renumbered)
     // Construct recommendation query params
-    // Note: Spotify API expects up to 5 seed values (artists, genres, tracks)
     const queryParams = new URLSearchParams({
       limit: String(limit),
       seed_genres: genre,
@@ -69,19 +79,29 @@ serve(async (req: Request) => {
       // max_tempo: String(targetTempo + 2),
     });
 
+    console.log(`Calling Spotify API: /recommendations?${queryParams.toString()}`);
     const recommendations = await fetchSpotifyApi(`/recommendations?${queryParams.toString()}`, accessToken);
     const tracks = recommendations.tracks; // Array of Track Objects
+    console.log(`Spotify API returned ${tracks?.length ?? 0} tracks.`);
 
+    // 4. Return results (renumbered)
+    console.log('Search successful, returning tracks.');
     return new Response(JSON.stringify({ data: tracks }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200
     });
 
   } catch (error) {
-    console.error('Function Error:', error.message);
+    // Log the full error object for more details if available
+    console.error('Function Error Caught:', error);
+    // Distinguish Spotify API errors from other errors
+    const isSpotifyAuthError = error.message.includes('Spotify API Error (401)') || error.message.includes('invalid access token');
+    const isInternalAuthError = error.message.includes('Authorization header');
+    const statusCode = isSpotifyAuthError || isInternalAuthError ? 401 : 500;
+
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: error.message.includes('authenticated') || error.message.includes('token') ? 401 : 500
+      status: statusCode
     });
   }
 }) 
