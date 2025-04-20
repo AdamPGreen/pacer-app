@@ -1,9 +1,13 @@
 import React, { createContext, useContext, useState } from 'react';
+import { Track } from '../types/spotify';
+
+// Removed Track type definition as it's now imported from types/spotify
 
 type MeasurementSystem = 'metric' | 'imperial';
 type PaceUnit = 'min/km' | 'min/mile';
 type Gender = 'male' | 'female' | 'other';
-type Genre = 'pop' | 'rock' | 'hip-hop' | 'electronic' | 'country' | 'classical' | 'jazz' | 'r&b';
+// Let's use a more specific type or allow string for flexibility
+type Genre = string; // Allow any string from Spotify
 
 interface RunContextProps {
   height: number;
@@ -27,7 +31,15 @@ interface RunContextProps {
   footfallsPerMinute: number;
   totalRunTimeMinutes: number;
   strideLength: number;
-  calculateStats: () => void;
+  calculateStats: () => number; // Modified to return footfallsPerMinute
+
+  // New state for Spotify search
+  searchResults: Track[];
+  setSearchResults: (results: Track[]) => void;
+  isLoadingSearch: boolean;
+  setIsLoadingSearch: (loading: boolean) => void;
+  searchError: string | null;
+  setSearchError: (error: string | null) => void;
 }
 
 const RunContext = createContext<RunContextProps | undefined>(undefined);
@@ -45,6 +57,11 @@ export const RunContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [footfallsPerMinute, setFootfallsPerMinute] = useState<number>(0);
   const [totalRunTimeMinutes, setTotalRunTimeMinutes] = useState<number>(0);
   const [strideLength, setStrideLength] = useState<number>(0);
+
+  // New state for Spotify search
+  const [searchResults, setSearchResults] = useState<Track[]>([]);
+  const [isLoadingSearch, setIsLoadingSearch] = useState<boolean>(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const calculateStats = () => {
     // Convert height to cm if in imperial
@@ -66,11 +83,14 @@ export const RunContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // 1000 meters per km / stride length in meters = steps per km
     // steps per km / pace in min per km = steps per minute
     const stepsPerKm = 1000 / calculatedStrideLength;
-    const calculatedFootfallsPerMinute = stepsPerKm / paceInMinPerKm;
+    const calculatedFootfallsPerMinute = Math.round(stepsPerKm / paceInMinPerKm);
     
     setStrideLength(calculatedStrideLength);
-    setFootfallsPerMinute(Math.round(calculatedFootfallsPerMinute));
+    setFootfallsPerMinute(calculatedFootfallsPerMinute);
     setTotalRunTimeMinutes(calculatedTotalRunTime);
+    
+    // Return the calculated footfalls per minute
+    return calculatedFootfallsPerMinute;
   };
 
   return (
@@ -98,6 +118,12 @@ export const RunContextProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         totalRunTimeMinutes,
         strideLength,
         calculateStats,
+        searchResults,
+        setSearchResults,
+        isLoadingSearch,
+        setIsLoadingSearch,
+        searchError,
+        setSearchError,
       }}
     >
       {children}

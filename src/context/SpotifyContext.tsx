@@ -1,112 +1,137 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import SpotifyWebApi from 'spotify-web-api-js';
-
-const SPOTIFY_CLIENT_ID = '3502638438f74f65872deb46ec872c68';
-const REDIRECT_URI = 'http://localhost:5173';
+import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
+import { Session, SupabaseClient } from '@supabase/supabase-js';
+import { useSession, useSupabaseClient } from '@supabase/auth-helpers-react';
+import { Track, PlaylistResponse } from '../types/spotify';
 
 interface SpotifyContextType {
-  spotifyApi: SpotifyWebApi.SpotifyWebApiJs;
-  isAuthenticated: boolean;
-  login: () => void;
+  session: Session | null;
+  isLoadingSession: boolean;
+  supabase: SupabaseClient;
+  login: () => Promise<void>;
+  logout: () => Promise<void>;
+  searchTracks: (genre: string, targetTempo: number, limit: number) => Promise<Track[]>;
+  createPlaylist: (name: string, tracks: string[]) => Promise<PlaylistResponse>;
   error: string | null;
-  createPlaylist: (name: string, tracks: string[]) => Promise<string>;
-  searchTracksByTempo: (genre: string, targetTempo: number, limit: number) => Promise<SpotifyApi.TrackObjectFull[]>;
+  clearError: () => void;
 }
 
 const SpotifyContext = createContext<SpotifyContextType | undefined>(undefined);
 
-export const SpotifyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [spotifyApi] = useState<SpotifyWebApi.SpotifyWebApiJs>(() => new SpotifyWebApi());
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const session = useSession();
+  const supabaseClient = useSupabaseClient();
   const [error, setError] = useState<string | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState(true);
 
+  // Handle initial session loading state
   useEffect(() => {
-    const params = new URLSearchParams(window.location.hash.substring(1));
-    const accessToken = params.get('access_token');
-    const errorParam = params.get('error');
-
-    if (errorParam) {
-      setError(errorParam);
-      window.history.replaceState({}, document.title, window.location.pathname);
-      return;
+    // useSession() might initially be null then update.
+    // Wait for the session to be definitively loaded (or stay null)
+    if (session !== undefined) {
+      setIsLoadingSession(false);
     }
 
-    if (accessToken) {
-      spotifyApi.setAccessToken(accessToken);
-      setIsAuthenticated(true);
-      setError(null);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, [spotifyApi]);
+    // Listen for auth state changes to clear errors on login/logout
+    const { data: authListener } = supabaseClient.auth.onAuthStateChange(
+      (event, session) => {
+        setError(null); // Clear error on auth change
+        if (event === 'INITIAL_SESSION') {
+          setIsLoadingSession(false);
+        } else if (event === 'SIGNED_IN') {
+          // Handle post-sign-in actions if needed
+          console.log('User signed in successfully');
+        } else if (event === 'SIGNED_OUT') {
+          // Handle post-sign-out actions if needed
+          console.log('User signed out successfully');
+        }
+      }
+    );
 
-  const login = () => {
-    const scope = 'playlist-modify-public user-read-private user-read-email';
-    const authUrl = `https://accounts.spotify.com/authorize?client_id=${SPOTIFY_CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(scope)}&show_dialog=true`;
-    window.location.href = authUrl;
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, [session, supabaseClient.auth]);
+
+  const clearError = () => setError(null);
+
+  const login = async () => {
+    setError(null);
+    const { error: loginError } = await supabaseClient.auth.signInWithOAuth({
+      provider: 'spotify',
+      options: {
+        scopes: 'playlist-modify-public user-read-private user-read-email',
+        // Optional: Redirect back to a specific page after login
+        // redirectTo: `${import.meta.env.VITE_APP_URL || window.location.origin}/`
+      },
+    });
+    if (loginError) {
+      console.error('Error logging in:', loginError);
+      setError(`Login failed: ${loginError.message}`);
+    }
   };
 
-  const createPlaylist = async (name: string, tracks: string[]) => {
+  const logout = async () => {
+    setError(null);
+    const { error: logoutError } = await supabaseClient.auth.signOut();
+    if (logoutError) {
+      console.error('Error logging out:', logoutError);
+      setError(`Logout failed: ${logoutError.message}`);
+    }
+  };
+
+  // Edge Function Callers
+  const searchTracks = async (genre: string, targetTempo: number, limit: number): Promise<Track[]> => {
+    setError(null);
     try {
-      const user = await spotifyApi.getMe();
-      const playlist = await spotifyApi.createPlaylist(user.id, {
-        name,
-        description: 'Created by Pacer - Your perfect running playlist',
-        public: true
+      const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-search', {
+        body: { genre, targetTempo, limit },
       });
-      await spotifyApi.addTracksToPlaylist(playlist.id, tracks);
-      return playlist.external_urls.spotify;
-    } catch (err) {
-      setError('Failed to create playlist. Please try logging in again.');
-      setIsAuthenticated(false);
+      if (functionError) {
+        console.error('Error searching tracks:', functionError);
+        setError(`Search failed: ${functionError.message}`);
+        throw functionError;
+      }
+      return data.data || data;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(`Search failed: ${errorMessage}`);
       throw err;
     }
   };
 
-  const searchTracksByTempo = async (genre: string, targetTempo: number, limit: number) => {
+  const createPlaylist = async (name: string, tracks: string[]): Promise<PlaylistResponse> => {
+    setError(null);
     try {
-      const tolerance = 2; // BPM tolerance range
-      const results: SpotifyApi.TrackObjectFull[] = [];
-      let offset = 0;
-
-      while (results.length < limit) {
-        const response = await spotifyApi.searchTracks(`genre:${genre}`, {
-          limit: 50,
-          offset
-        });
-
-        const trackIds = response.tracks.items.map(track => track.id);
-        const audioFeatures = await spotifyApi.getAudioFeaturesForTracks(trackIds);
-
-        const matchingTracks = response.tracks.items.filter((track, index) => {
-          const tempo = audioFeatures.audio_features[index]?.tempo;
-          return tempo && Math.abs(tempo - targetTempo) <= tolerance;
-        });
-
-        results.push(...matchingTracks);
-        
-        if (response.tracks.items.length < 50 || offset > 950) {
-          break;
-        }
-        
-        offset += 50;
+      const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-create-playlist', {
+        body: { name, tracks },
+      });
+      if (functionError) {
+        console.error('Error creating playlist:', functionError);
+        setError(`Playlist creation failed: ${functionError.message}`);
+        throw functionError;
       }
-
-      return results.slice(0, limit);
-    } catch (err) {
-      setError('Failed to search tracks. Please try logging in again.');
-      setIsAuthenticated(false);
+      if (!data || !data.playlistUrl) {
+        throw new Error("Playlist URL not returned from function.");
+      }
+      return data as PlaylistResponse;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(`Playlist creation failed: ${errorMessage}`);
       throw err;
     }
   };
 
   return (
     <SpotifyContext.Provider value={{
-      spotifyApi,
-      isAuthenticated,
+      session,
+      isLoadingSession,
+      supabase: supabaseClient,
       login,
-      error,
+      logout,
+      searchTracks,
       createPlaylist,
-      searchTracksByTempo
+      error,
+      clearError
     }}>
       {children}
     </SpotifyContext.Provider>

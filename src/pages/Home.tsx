@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, ArrowRight } from 'lucide-react';
+import { Check, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import HeightInput from '../components/Form/HeightInput';
 import PaceInput from '../components/Form/PaceInput';
 import DistanceInput from '../components/Form/DistanceInput';
 import GenreSelector from '../components/Form/GenreSelector';
 import { useRunContext } from '../context/RunContext';
+import { useSpotify } from '../context/SpotifyContext';
+import { SPOTIFY } from '../constants';
 
 const steps = [
   { id: 'height', label: 'Height', component: HeightInput },
@@ -16,23 +18,57 @@ const steps = [
 
 const Home: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(0);
-  const { calculateStats } = useRunContext();
+  const {
+    calculateStats,
+    genre,
+    setSearchResults,
+    isLoadingSearch,
+    setIsLoadingSearch,
+    searchError,
+    setSearchError,
+  } = useRunContext();
+  const { searchTracks } = useSpotify();
   const navigate = useNavigate();
   
   const CurrentStepComponent = steps[currentStep].component;
   
-  const goToNextStep = () => {
+  const goToNextStep = async () => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // Last step completed, calculate and navigate to results
-      calculateStats();
-      navigate('/results');
+      setIsLoadingSearch(true);
+      setSearchError(null);
+      setSearchResults([]);
+
+      try {
+        // Get the calculated tempo immediately from the function return value
+        const calculatedTempo = calculateStats();
+
+        console.log(`Searching Spotify with Genre: ${genre}, Tempo: ${calculatedTempo}`);
+
+        if (!genre || calculatedTempo <= 0) {
+           throw new Error("Genre or calculated tempo is missing or invalid.");
+        }
+
+        const results = await searchTracks(genre, calculatedTempo, SPOTIFY.SEARCH_LIMIT);
+        setSearchResults(results);
+        console.log('Search successful, navigating to results...');
+        navigate('/results');
+      } catch (error: unknown) {
+        console.error("Error during search or calculation:", error);
+        const message = error instanceof Error 
+          ? error.message 
+          : 'Failed to fetch tracks. Please try again.';
+        setSearchError(message);
+      } finally {
+        setIsLoadingSearch(false);
+      }
     }
   };
   
   const goToPreviousStep = () => {
     if (currentStep > 0) {
+      setSearchError(null);
       setCurrentStep(currentStep - 1);
     }
   };
@@ -104,13 +140,27 @@ const Home: React.FC = () => {
           <CurrentStepComponent />
         </div>
         
+        {/* Error Display Area */}
+        {searchError && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-6 flex items-center">
+            <AlertCircle className="w-5 h-5 mr-2" />
+            <span>{searchError}</span>
+            <button
+              onClick={() => setSearchError(null)}
+              className="absolute top-0 bottom-0 right-0 px-4 py-3 text-red-700"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+        
         {/* Navigation buttons */}
         <div className="flex justify-between">
           <button
             onClick={goToPreviousStep}
-            disabled={currentStep === 0}
+            disabled={currentStep === 0 || isLoadingSearch}
             className={`px-6 py-3 rounded-lg ${
-              currentStep === 0
+              currentStep === 0 || isLoadingSearch
                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
@@ -120,15 +170,21 @@ const Home: React.FC = () => {
           
           <button
             onClick={goToNextStep}
-            className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:from-cyan-600 hover:to-blue-700 transition-all shadow-md flex items-center"
+            disabled={isLoadingSearch}
+            className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 text-white rounded-lg hover:from-cyan-600 hover:to-blue-700 transition-all shadow-md flex items-center disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {currentStep < steps.length - 1 ? (
+            {isLoadingSearch ? (
+              <>
+                <Loader2 size={18} className="animate-spin mr-2" />
+                Calculating...
+              </>
+            ) : currentStep < steps.length - 1 ? (
               <>
                 Next
                 <ArrowRight size={18} className="ml-2" />
               </>
             ) : (
-              'Calculate Your Playlist'
+              'Find My Playlist'
             )}
           </button>
         </div>
