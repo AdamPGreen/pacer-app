@@ -83,15 +83,29 @@ export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children })
   const searchTracks = async (genre: string, targetTempo: number, limit: number): Promise<Track[]> => {
     setError(null);
     
+    // Ensure we have a session and the refresh token before proceeding
+    if (!session?.provider_refresh_token) {
+      setError("Spotify session invalid or refresh token missing. Please log in again.");
+      console.error("Missing session or provider_refresh_token in searchTracks");
+      throw new Error("Spotify session invalid or refresh token missing.");
+    }
+    
+    const refreshToken = session.provider_refresh_token;
+
     try {
       console.log('Searching Spotify with Genre:', genre, 'Tempo:', targetTempo);
       
+      console.log('[SpotifyContext] Refresh Token:', refreshToken);
+      const requestBody = {
+        genre,
+        targetTempo,
+        limit,
+        refreshToken
+      };
+      console.log('[SpotifyContext] Sending body to edge function:', requestBody);
+
       const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-search', {
-        body: {
-          genre,
-          targetTempo,
-          limit
-        },
+        body: requestBody,
       });
       
       if (functionError) {
@@ -99,19 +113,38 @@ export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children })
         setError(`Search failed: ${functionError.message}`);
         throw functionError;
       }
-      return data.data || data;
+      // Ensure data structure is as expected
+      if (!data || !Array.isArray(data.data)) {
+         console.error('Unexpected data format from spotify-search function:', data);
+         throw new Error('Received invalid track data from the server.');
+      }
+      return data.data; // Assuming the function returns { data: tracks[] }
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred during search';
       setError(`Search failed: ${errorMessage}`);
+      console.error("Caught error in searchTracks:", err); // Log the full error
       throw err;
     }
   };
 
   const createPlaylist = async (name: string, tracks: string[]): Promise<PlaylistResponse> => {
     setError(null);
+
+    // Ensure we have a session and the refresh token before proceeding
+    if (!session?.provider_refresh_token) {
+      setError("Spotify session invalid or refresh token missing. Please log in again.");
+      console.error("Missing session or provider_refresh_token in createPlaylist");
+      throw new Error("Spotify session invalid or refresh token missing.");
+    }
+    const refreshToken = session.provider_refresh_token;
+
     try {
       const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-create-playlist', {
-        body: { name, tracks },
+        body: { 
+          name, 
+          tracks,
+          refreshToken // Pass the refresh token
+        },
       });
       if (functionError) {
         console.error('Error creating playlist:', functionError);
