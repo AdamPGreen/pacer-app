@@ -18,8 +18,18 @@ async function fetchSpotifyApi(endpoint: string, accessToken: string, method: st
   }
   const response = await fetch(url, options);
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ message: 'Unknown Spotify API error' }));
-    console.error(`Spotify API Error (${response.status}): ${JSON.stringify(errorData)}`);
+    // ADDED: Log raw response text before trying to parse JSON
+    const rawErrorText = await response.text();
+    console.error(`Spotify API Error Raw Response (${response.status}): ${rawErrorText}`);
+    // Attempt to parse JSON, fallback to raw text
+    let errorData;
+    try {
+      errorData = JSON.parse(rawErrorText);
+    } catch (parseError) {
+      console.error('Failed to parse Spotify error response as JSON:', parseError);
+      errorData = { error: { message: rawErrorText } }; // Use raw text as message
+    }
+    // console.error(`Spotify API Error (${response.status}): ${JSON.stringify(errorData)}`); // Original log
     throw new Error(`Spotify API Error (${response.status}): ${errorData.error?.message || 'Failed request'}`);
   }
   // For 204 No Content responses (like successful add tracks)
@@ -36,6 +46,9 @@ serve(async (req: Request) => {
   console.log(`spotify-search function invoked (method: ${req.method})`);
 
   try {
+    // ADDED: Log entry into try block
+    console.log('Inside try block');
+
     // 1. Extract Spotify token directly from Authorization header (REMOVED)
     // const authHeader = req.headers.get('Authorization');
     // console.log(`Authorization header received: ${authHeader ? 'Bearer ...' : 'null'}`); // Log presence, not value
@@ -59,7 +72,10 @@ serve(async (req: Request) => {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
     }
-    const { genre, targetTempo, limit = 20, spotifyToken } = await req.json(); // Extract spotifyToken
+    const body = await req.json(); // Extract spotifyToken
+    // ADDED: Log the parsed body
+    console.log('Request body parsed:', body);
+    const { genre, targetTempo, limit = 20, spotifyToken } = body;
     console.log(`Search parameters: genre=${genre}, targetTempo=${targetTempo}, limit=${limit}, spotifyToken received: ${!!spotifyToken}`); // Log token presence
 
     // Validate required parameters including spotifyToken
@@ -99,11 +115,20 @@ serve(async (req: Request) => {
   } catch (error) {
     // Log the full error object for more details if available
     console.error('Function Error Caught:', error);
+    // ADDED: Log specific properties for better debugging
+    console.error('Error Message:', error.message);
+    console.error('Error Stack:', error.stack);
+    // Attempt to log status if it's a ResponseError-like object (might not always be present)
+    // console.error('Original Status (if available):', error.response?.status); 
+
     // Distinguish Spotify API errors from other errors
     const isSpotifyAuthError = error.message.includes('Spotify API Error (401)') || error.message.includes('invalid access token');
     // Update internal auth error check to reflect missing token in body
     const isInternalAuthError = error.message.includes('Missing or invalid parameters'); // Simpler check now
     const statusCode = isSpotifyAuthError || isInternalAuthError ? 401 : 500;
+
+    // ADDED: Log before returning from catch
+    console.log(`Inside catch block, preparing ${statusCode} response`);
 
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

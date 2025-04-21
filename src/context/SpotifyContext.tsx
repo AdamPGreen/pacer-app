@@ -82,23 +82,14 @@ export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Edge Function Callers
   const searchTracks = async (genre: string, targetTempo: number, limit: number): Promise<Track[]> => {
     setError(null);
-    if (!session?.provider_token) {
-      const errMsg = 'Spotify session or provider token not found.';
-      console.error(errMsg);
-      setError(errMsg);
-      throw new Error(errMsg);
-    }
-
-    // Log the token presence (don't log the actual token for security)
-    console.log('Spotify provider token found, proceeding with search.');
-
+    
     try {
+      console.log('Searching Spotify with Genre:', genre, 'Tempo:', targetTempo);
       const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-search', {
         body: {
           genre,
           targetTempo,
-          limit,
-          spotifyToken: session.provider_token
+          limit
         },
       });
       if (functionError) {
