@@ -85,13 +85,24 @@ export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children })
     
     try {
       console.log('Searching Spotify with Genre:', genre, 'Tempo:', targetTempo);
+      
+      // Retrieve the Spotify token from the session
+      const { data: { session: currentSession } } = await supabaseClient.auth.getSession();
+      const spotifyToken = currentSession?.provider_token;
+      
+      if (!spotifyToken) {
+        throw new Error('Spotify token not available. Please log in again.');
+      }
+      
       const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-search', {
         body: {
           genre,
           targetTempo,
-          limit
+          limit,
+          spotifyToken // Include the token in the request body
         },
       });
+      
       if (functionError) {
         console.error('Error searching tracks:', functionError);
         setError(`Search failed: ${functionError.message}`);
