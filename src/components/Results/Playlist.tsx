@@ -79,7 +79,7 @@ const Playlist: React.FC<PlaylistProps> = ({ searchResults }) => {
        <div className="bg-gray-50 px-6 py-4 text-sm text-gray-500">
          <div className="flex items-center">
            <Music size={16} className="text-purple-500 mr-2" />
-           <span>{searchResults.length} tracks found matching {footfallsPerMinute} BPM</span>
+           <span>{searchResults.length} tracks found near {footfallsPerMinute} BPM</span>
          </div>
        </div>
     </div>

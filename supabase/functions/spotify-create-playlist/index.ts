@@ -2,6 +2,46 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 
+// Function to get a new Spotify access token using a refresh token
+async function refreshSpotifyToken(refreshToken: string): Promise<string> {
+  const clientId = Deno.env.get('SPOTIFY_CLIENT_ID');
+  const clientSecret = Deno.env.get('SPOTIFY_CLIENT_SECRET');
+
+  if (!clientId || !clientSecret) {
+    console.error('Missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET environment variables');
+    throw new Error('Server configuration error: Spotify credentials missing.');
+  }
+
+  const basicAuth = btoa(`${clientId}:${clientSecret}`); // Base64 encode client_id:client_secret
+
+  const response = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': `Basic ${basicAuth}`
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    })
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`Spotify Token Refresh Error (${response.status}): ${errorBody}`);
+    throw new Error(`Failed to refresh Spotify token: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  if (!data.access_token) {
+    console.error('Access token not found in Spotify refresh response:', data);
+    throw new Error('Failed to obtain access token from Spotify.');
+  }
+  
+  console.log('Successfully refreshed Spotify access token.');
+  return data.access_token;
+}
+
 // Basic Spotify API client using fetch
 async function fetchSpotifyApi(endpoint: string, accessToken: string, method: string = 'GET', body?: any) {
   const url = `https://api.spotify.com/v1${endpoint}`;
@@ -39,20 +79,17 @@ serve(async (req: Request) => {
       { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
     );
 
-    // 2. Get user session and verify Spotify provider token
-    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-    if (sessionError || !session || !session.provider_token) {
-      throw new Error(sessionError?.message || "User not authenticated or missing Spotify token.");
-    }
-    const accessToken = session.provider_token;
-
-    // 3. Get request body parameters
-    const { name, tracks } = await req.json();
-    if (!name || !Array.isArray(tracks) || tracks.length === 0 || !tracks.every(t => typeof t === 'string' && t.startsWith('spotify:track:'))) {
-      return new Response(JSON.stringify({ error: 'Missing or invalid parameters: name (string), tracks (non-empty array of Spotify URIs)' }), {
+    // 2. Get request body parameters
+    const { name, tracks, refreshToken } = await req.json();
+    if (!name || !Array.isArray(tracks) || tracks.length === 0 || !tracks.every(t => typeof t === 'string' && t.startsWith('spotify:track:')) || !refreshToken) {
+      return new Response(JSON.stringify({ error: 'Missing or invalid parameters: name (string), tracks (non-empty array of Spotify URIs), refreshToken' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
+
+    // 3. Refresh the Spotify Access Token
+    console.log('---> Attempting to refresh Spotify token...')
+    const accessToken = await refreshSpotifyToken(refreshToken);
 
     // 4. Create Playlist Logic
     // Get User ID

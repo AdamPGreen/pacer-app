@@ -16,7 +16,7 @@ const Results: React.FC = () => {
     isLoadingSearch,
     searchError,
   } = useRunContext();
-  const { createPlaylist } = useSpotify();
+  const { createPlaylist, session } = useSpotify();
 
   // State for playlist creation
   const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false);
@@ -25,6 +25,10 @@ const Results: React.FC = () => {
 
   const handleCreatePlaylist = async () => {
     if (!searchResults || searchResults.length === 0) return;
+    if (!session?.provider_refresh_token) {
+      setCreateError("Spotify session invalid or refresh token missing. Please log in again.");
+      return;
+    }
 
     setIsCreatingPlaylist(true);
     setPlaylistUrl(null);

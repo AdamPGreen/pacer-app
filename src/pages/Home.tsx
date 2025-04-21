@@ -44,13 +44,18 @@ const Home: React.FC = () => {
         // Get the calculated tempo immediately from the function return value
         const calculatedTempo = calculateStats();
 
+        // Use exact BPM matching with minimal tolerance (+/- 1 BPM)
+        // This gives us the closest tracks to the exact cadence
+        const minTempo = calculatedTempo - 1;
+        const maxTempo = calculatedTempo + 1;
+
         console.log(`Searching Spotify with Genre: ${genre}, Tempo: ${calculatedTempo}`);
 
         if (!genre || calculatedTempo <= 0) {
            throw new Error("Genre or calculated tempo is missing or invalid.");
         }
 
-        const results = await searchTracks(genre, calculatedTempo, SPOTIFY.SEARCH_LIMIT);
+        const results = await searchTracks(genre, minTempo, maxTempo, SPOTIFY.SEARCH_LIMIT);
         setSearchResults(results);
         console.log('Search successful, navigating to results...');
         navigate('/results');

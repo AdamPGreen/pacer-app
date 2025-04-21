@@ -9,7 +9,7 @@ interface SpotifyContextType {
   supabase: SupabaseClient;
   login: () => Promise<void>;
   logout: () => Promise<void>;
-  searchTracks: (genre: string, targetTempo: number, limit: number) => Promise<Track[]>;
+  searchTracks: (genre: string, minTempo: number, maxTempo: number, limit: number) => Promise<Track[]>;
   createPlaylist: (name: string, tracks: string[]) => Promise<PlaylistResponse>;
   error: string | null;
   clearError: () => void;
@@ -80,7 +80,7 @@ export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   // Edge Function Callers
-  const searchTracks = async (genre: string, targetTempo: number, limit: number): Promise<Track[]> => {
+  const searchTracks = async (genre: string, minTempo: number, maxTempo: number, limit: number): Promise<Track[]> => {
     setError(null);
     
     // Ensure we have a session and the refresh token before proceeding
@@ -93,17 +93,18 @@ export const SpotifyProvider: React.FC<{ children: ReactNode }> = ({ children })
     const refreshToken = session.provider_refresh_token;
 
     try {
-      console.log('Searching Spotify with Genre:', genre, 'Tempo:', targetTempo);
+      console.log('Searching Spotify with Genre:', genre, 'Min Tempo:', minTempo, 'Max Tempo:', maxTempo);
       
       console.log('[SpotifyContext] Refresh Token:', refreshToken);
       const requestBody = {
         genre,
-        targetTempo,
+        minTempo,
+        maxTempo,
         limit,
         refreshToken
       };
       console.log('[SpotifyContext] Sending body to edge function:', requestBody);
-
+      
       const { data, error: functionError } = await supabaseClient.functions.invoke('spotify-search', {
         body: requestBody,
       });
