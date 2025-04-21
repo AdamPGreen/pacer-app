@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
-// Remove Supabase client import if no longer needed for other purposes
-// import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Re-enable Supabase client import
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 
 // Basic Spotify API client using fetch
@@ -29,7 +29,6 @@ async function fetchSpotifyApi(endpoint: string, accessToken: string, method: st
       console.error('Failed to parse Spotify error response as JSON:', parseError);
       errorData = { error: { message: rawErrorText } }; // Use raw text as message
     }
-    // console.error(`Spotify API Error (${response.status}): ${JSON.stringify(errorData)}`); // Original log
     throw new Error(`Spotify API Error (${response.status}): ${errorData.error?.message || 'Failed request'}`);
   }
   // For 204 No Content responses (like successful add tracks)
@@ -46,21 +45,23 @@ serve(async (req: Request) => {
   console.log(`spotify-search function invoked (method: ${req.method})`);
 
   try {
-    // ADDED: Log entry into try block
     console.log('Inside try block');
 
-    // 1. Extract Spotify token directly from Authorization header (REMOVED)
-    // const authHeader = req.headers.get('Authorization');
-    // console.log(`Authorization header received: ${authHeader ? 'Bearer ...' : 'null'}`); // Log presence, not value
-    // if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    //   console.error('Missing or invalid Authorization header');
-    //   return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
-    //     status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    //   });
-    // }
-    // const accessToken = authHeader.substring(7); // Remove 'Bearer '
+    // 1. Create Supabase client with user's auth context
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+    );
 
-    // 2. Get request body parameters (renumbered)
+    // 2. Get user session and verify Spotify provider token
+    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+    if (sessionError || !session || !session.provider_token) {
+      throw new Error(sessionError?.message || "User not authenticated or missing Spotify token.");
+    }
+    const accessToken = session.provider_token;
+
+    // 3. Get request body parameters
     if (req.method !== 'POST') {
         return new Response(JSON.stringify({ error: 'Method not allowed' }), {
           status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -72,24 +73,20 @@ serve(async (req: Request) => {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
     }
-    const body = await req.json(); // Extract spotifyToken
-    // ADDED: Log the parsed body
+    const body = await req.json();
     console.log('Request body parsed:', body);
-    const { genre, targetTempo, limit = 20, spotifyToken } = body;
-    console.log(`Search parameters: genre=${genre}, targetTempo=${targetTempo}, limit=${limit}, spotifyToken received: ${!!spotifyToken}`); // Log token presence
+    const { genre, targetTempo, limit = 20 } = body;
+    console.log(`Search parameters: genre=${genre}, targetTempo=${targetTempo}, limit=${limit}`);
 
-    // Validate required parameters including spotifyToken
-    if (!genre || typeof targetTempo !== 'number' || typeof limit !== 'number' || !spotifyToken) {
-      console.error('Invalid parameters received (genre, targetTempo, limit, spotifyToken)');
-      return new Response(JSON.stringify({ error: 'Missing or invalid parameters: genre (string), targetTempo (number), limit (number), spotifyToken (string)' }), {
+    // Validate required parameters
+    if (!genre || typeof targetTempo !== 'number' || typeof limit !== 'number') {
+      console.error('Invalid parameters received (genre, targetTempo, limit)');
+      return new Response(JSON.stringify({ error: 'Missing or invalid parameters: genre (string), targetTempo (number), limit (number)' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // Assign spotifyToken to accessToken for clarity in subsequent code
-    const accessToken = spotifyToken;
-
-    // 3. Spotify Search Logic (Using Recommendations Endpoint - Simpler for Tempo) (renumbered)
+    // 4. Spotify Search Logic (Using Recommendations Endpoint - Simpler for Tempo)
     // Construct recommendation query params
     const queryParams = new URLSearchParams({
       limit: String(limit),
@@ -101,11 +98,11 @@ serve(async (req: Request) => {
     });
 
     console.log(`Calling Spotify API: /recommendations?${queryParams.toString()}`);
-    const recommendations = await fetchSpotifyApi(`/recommendations?${queryParams.toString()}`, accessToken); // Use the token from body
+    const recommendations = await fetchSpotifyApi(`/recommendations?${queryParams.toString()}`, accessToken);
     const tracks = recommendations.tracks; // Array of Track Objects
     console.log(`Spotify API returned ${tracks?.length ?? 0} tracks.`);
 
-    // 4. Return results (renumbered)
+    // 5. Return results
     console.log('Search successful, returning tracks.');
     return new Response(JSON.stringify({ data: tracks }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -115,19 +112,16 @@ serve(async (req: Request) => {
   } catch (error) {
     // Log the full error object for more details if available
     console.error('Function Error Caught:', error);
-    // ADDED: Log specific properties for better debugging
     console.error('Error Message:', error.message);
     console.error('Error Stack:', error.stack);
-    // Attempt to log status if it's a ResponseError-like object (might not always be present)
-    // console.error('Original Status (if available):', error.response?.status); 
 
     // Distinguish Spotify API errors from other errors
-    const isSpotifyAuthError = error.message.includes('Spotify API Error (401)') || error.message.includes('invalid access token');
-    // Update internal auth error check to reflect missing token in body
-    const isInternalAuthError = error.message.includes('Missing or invalid parameters'); // Simpler check now
-    const statusCode = isSpotifyAuthError || isInternalAuthError ? 401 : 500;
+    const isSpotifyAuthError = error.message.includes('Spotify API Error (401)') || 
+                              error.message.includes('invalid access token') ||
+                              error.message.includes('User not authenticated') ||
+                              error.message.includes('missing Spotify token');
+    const statusCode = isSpotifyAuthError ? 401 : 500;
 
-    // ADDED: Log before returning from catch
     console.log(`Inside catch block, preparing ${statusCode} response`);
 
     return new Response(JSON.stringify({ error: error.message }), {
